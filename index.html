@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>湖東タイピング</title>
   <link rel="stylesheet" href="style.css">
+  <script>
+    (function() {
+      // ↓ ここを友達に教えるパスワードに変更してください
+      const SECRET_PASSWORD = "kotou_class8";
+
+      const userInput = prompt("【湖東タイピング】\nパスワードを入力してください:");
+      if (userInput !== SECRET_PASSWORD) {
+        alert("パスワードが違います！アクセスできません。");
+        document.write("<h1 style='text-align:center; margin-top:100px; font-family:sans-serif;'>🔒 アクセス権限がありません</h1>");
+        window.stop();
+      }
+    })();
+  </script>
 </head>
 <body>
   <div class="game-container">
