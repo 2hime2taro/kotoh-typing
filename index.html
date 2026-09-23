@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>湖東タイピング</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="game-container">
+    <h1>湖東タイピング</h1>
+
+    <!-- 設定・スタート画面 -->
+    <div id="start-screen" class="screen active">
+      <div class="setting-group">
+        <label>プレイヤー名:</label>
+        <input type="text" id="player-name-input" placeholder="名前を入力してください" maxlength="15">
+      </div>
+
+      <div class="setting-group">
+        <label>難易度:</label>
+        <select id="level-select">
+          <option value="1">レベル1</option>
+          <option value="2">レベル2</option>
+          <option value="3">レベル3</option>
+          <option value="4">大会</option>
+        </select>
+      </div>
+
+      <!-- ハイスコア表示 -->
+      <div class="highscore-box">
+        自己ベスト (KPM): <span id="best-kpm">0</span>
+      </div>
+
+      <!-- ランキング表示エリア -->
+      <div class="ranking-section">
+        <h3>🏆 難易度別トップ3</h3>
+        <div id="ranking-list" class="ranking-list"></div>
+      </div>
+
+      <button id="start-btn" class="main-btn">ゲームスタート！</button>
+    </div>
+
+    <!-- プレイ画面 -->
+    <div id="play-screen" class="screen">
+      <div class="status-bar">
+        <div class="status-item">残り時間: <span id="timer">30</span> 秒</div>
+        <div class="status-item">スコア: <span id="score">0</span></div>
+      </div>
+
+      <div class="word-display-area">
+        <div id="kanji-display" class="kanji-text">おだい</div>
+        <div id="roma-display" class="roma-text">
+          <span id="typed-text" class="typed"></span><span id="untyped-text" class="untyped">odai</span>
+        </div>
+        <div class="next-word-box">
+          NEXT: <span id="next-kanji-display">つぎのおだい</span>
+        </div>
+      </div>
+
+      <div class="instruction">半角英数キーボードで入力してください</div>
+    </div>
+
+    <!-- リザルト画面 -->
+    <div id="result-screen" class="screen">
+      <div class="result-card" id="capture-area">
+        <div class="result-header">
+          <h2>タイピング大会 結果証明書</h2>
+        </div>
+
+        <div class="player-info">
+          <span>プレイヤー名:</span>
+          <strong id="res-player-name">ゲスト</strong>
+        </div>
+
+        <div class="rank-box">
+          <div class="rank-title">評価ランク & 称号</div>
+          <div id="res-rank" class="rank-display">S</div>
+          <div id="res-title" class="title-display">タイピングマスター</div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-box">
+            <span class="stat-label">1分あたりの打鍵数 (KPM)</span>
+            <span id="res-wpm" class="stat-value">0</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">正確性 (正答率)</span>
+            <span id="res-accuracy" class="stat-value">0%</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-label">ミスタイプ数</span>
+            <span id="res-miss" class="stat-value">0 回</span>
+          </div>
+        </div>
+        
+        <div id="new-record-msg" class="new-record-msg" style="display: none;">🎉 自己ベスト更新！</div>
+      </div>
+
+      <button id="retry-btn" class="main-btn">もう一度挑戦する</button>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
