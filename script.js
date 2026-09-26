@@ -193,13 +193,6 @@ let cpuScore = 0;
 let cpuInterval = null;
 let meterValue = 50; 
 
-const CPU_SPEED_TARGETS = {
-  "1": 1.7,
-  "2": 3.3,
-  "3": 5.0,
-  "4": 8.3
-};
-
 let remainingWords = []; 
 let nextItem = null;
 let typedRoma = ""; 
@@ -208,6 +201,31 @@ let currentKanaStr = "";
 let romaPatterns = [];         
 let currentPatternIndex = 0;   
 let currentMatchedInput = "";  
+
+// レベルに応じた目標値（KPMまたは打鍵数）を取得
+function getTargetCount(level, mode = gameMode) {
+  const lvl = Number(level);
+  if (mode === 'ta') {
+    return lvl === 4 ? 200 : lvl * 50; // タイムアタック: レベル1:50打, レベル2:100打, レベル3:150打, 大会:200打
+  } else {
+    return lvl === 21 ? 1100 : lvl * 50; // CPU対戦: レベル1: 50KPM ... レベル21: 1100KPM
+  }
+}
+
+// 解放された最高レベルを取得・保存する処理（CPU対戦用）
+function getUnlockedLevel(mode) {
+  const saved = localStorage.getItem(`kotou_unlocked_lvl_${mode}`);
+  return saved ? Number(saved) : 1; // 初期値はレベル1
+}
+
+function unlockNextLevel(mode, clearedLevel) {
+  if (mode === 'ta') return; // タイムアタックは解放処理を行わない
+  const currentUnlocked = getUnlockedLevel(mode);
+  const nextLvl = Number(clearedLevel) + 1;
+  if (nextLvl > currentUnlocked && nextLvl <= 21) {
+    localStorage.setItem(`kotou_unlocked_lvl_${mode}`, nextLvl);
+  }
+}
 
 // ==========================================
 // 3. ローマ字解析ロジック
@@ -266,7 +284,7 @@ function parseKanaToRomaPatterns(kanaStr) {
 // 4. ランキング機能 (Local Storage)
 // ==========================================
 function getScores(level) {
-  const dataStr = localStorage.getItem(`kotou_typing_scores_lvl_${level}`);
+  const dataStr = localStorage.getItem(`kotou_typing_scores_lvl_${level}_${gameMode}`);
   return dataStr ? JSON.parse(dataStr) : [];
 }
 
@@ -275,7 +293,7 @@ function saveScore(level, name, kpm) {
   scores.push({ name: name, kpm: kpm, date: new Date().toLocaleDateString() });
   scores.sort((a, b) => b.kpm - a.kpm);
   scores = scores.slice(0, 5);
-  localStorage.setItem(`kotou_typing_scores_lvl_${level}`, JSON.stringify(scores));
+  localStorage.setItem(`kotou_typing_scores_lvl_${level}_${gameMode}`, JSON.stringify(scores));
 }
 
 function updateRankingDisplay() {
@@ -340,12 +358,17 @@ function nextWord() {
   const levelSelect = document.getElementById('level-select');
   const kanjiDisplay = document.getElementById('kanji-display');
   const typedTextDisplay = document.getElementById('typed-text');
-  const level = levelSelect ? levelSelect.value : "1";
+  
+  // CPU対戦の場合はすべて「4（大会）」の文章を使用。タイムアタックは選択したレベル
+  let levelKey = levelSelect ? levelSelect.value : "1";
+  if (gameMode === 'cpu') {
+    levelKey = "4"; 
+  }
 
   const currentItem = nextItem;
 
-  if (remainingWords.length === 0) {
-    remainingWords = WORD_LIST[level] ? [...WORD_LIST[level]] : [...WORD_LIST[1]];
+  if (!WORD_LIST[levelKey] || remainingWords.length === 0) {
+    remainingWords = [...(WORD_LIST[levelKey] || WORD_LIST[4])];
   }
   const randomIndex = Math.floor(Math.random() * remainingWords.length);
   nextItem = remainingWords.splice(randomIndex, 1)[0];
@@ -443,14 +466,16 @@ function startCpu() {
   const levelSelect = document.getElementById('level-select');
   const level = levelSelect ? levelSelect.value : "1";
   
-  const hitsPerSec = CPU_SPEED_TARGETS[level] || 2.0;
-  const intervalMs = 1000 / hitsPerSec;
+  // 目標KPMを取得し、1秒あたりの打鍵数に換算
+  const targetKpm = getTargetCount(level, 'cpu');
+  const hitsPerSec = targetKpm / 60; // 1秒あたりの打鍵数
+  const intervalMs = 1000 / hitsPerSec; // 1打鍵にかかるミリ秒数
 
   if (cpuInterval) clearInterval(cpuInterval);
 
   cpuInterval = setInterval(() => {
     cpuScore++;
-    pushMeter(-2.5);
+    pushMeter(-2.5); // CPUが1打鍵押すごとにゲージを2.5%押し戻す
   }, intervalMs);
 }
 
@@ -459,10 +484,11 @@ function showResults() {
   const name = (playerNameInput && playerNameInput.value.trim()) || "ゲスト";
   const levelSelect = document.getElementById('level-select');
   const level = levelSelect ? levelSelect.value : "1";
+  const targetValue = getTargetCount(level, gameMode);
 
   document.getElementById('res-player-name').textContent = name;
 
-  let elapsedMinutes = 0.5;
+  let elapsedMinutes = 0.5; // 30秒
   if (gameMode === 'cpu') {
     const elapsedSeconds = Math.max(1, (Date.now() - gameStartTime) / 1000);
     elapsedMinutes = elapsedSeconds / 60;
@@ -476,6 +502,11 @@ function showResults() {
   document.getElementById('res-wpm').textContent = kpm;
   document.getElementById('res-accuracy').textContent = `${accuracy}%`;
   document.getElementById('res-miss').textContent = `${missCount} 回`;
+
+  const targetCountEl = document.getElementById('res-target-count');
+  if (targetCountEl) {
+    targetCountEl.textContent = gameMode === 'cpu' ? `${targetValue} KPM` : `${targetValue} 打`;
+  }
 
   const vsBox = document.getElementById('vs-result-box');
   const cpuStatBox = document.getElementById('res-cpu-stat-box');
@@ -497,7 +528,8 @@ function showResults() {
 
     if (isWin) {
       if (vsStatusEl) { vsStatusEl.textContent = "WIN!"; vsStatusEl.className = "vs-status win"; }
-      if (targetMsgEl) { targetMsgEl.textContent = "🎉 メーターを押し切って完全勝利！"; targetMsgEl.style.color = "#2b6cb0"; }
+      if (targetMsgEl) { targetMsgEl.textContent = "🎉 CPU撃破！ 次のレベル解放！"; targetMsgEl.style.color = "#2b6cb0"; }
+      unlockNextLevel('cpu', level);
     } else {
       if (vsStatusEl) { vsStatusEl.textContent = "LOSE..."; vsStatusEl.className = "vs-status lose"; }
       if (targetMsgEl) { targetMsgEl.textContent = "❌ CPUに押し切られました..."; targetMsgEl.style.color = "#e53e3e"; }
@@ -607,8 +639,11 @@ function startGame() {
     if (timerStatusItem) timerStatusItem.style.display = "block";
   }
 
-  const level = levelSelect ? levelSelect.value : "1";
-  remainingWords = WORD_LIST[level] ? [...WORD_LIST[level]] : [...WORD_LIST[1]];
+  let levelKey = levelSelect ? levelSelect.value : "1";
+  if (gameMode === 'cpu') {
+    levelKey = "4"; // CPU対戦は常に大会用の文章を使用
+  }
+  remainingWords = [...(WORD_LIST[levelKey] || WORD_LIST[4])];
 
   let randomIndex = Math.floor(Math.random() * remainingWords.length);
   nextItem = remainingWords.splice(randomIndex, 1)[0];
@@ -639,11 +674,10 @@ function startGame() {
   });
 }
 
-// モードに応じて難易度の表示名と背景色クラスを切り替える関数
+// モードに応じて難易度の表示名、選択不可（鍵ロック）を切り替える関数
 function updateLevelOptions() {
   const levelSelect = document.getElementById('level-select');
   
-  // 背景色のクラス切り替え（落ち着いた色にするため body にクラスを付与）
   if (gameMode === 'cpu') {
     document.body.classList.remove('mode-ta');
     document.body.classList.add('mode-cpu');
@@ -654,27 +688,47 @@ function updateLevelOptions() {
 
   if (!levelSelect) return;
 
-  const currentVal = levelSelect.value; // 現在選ばれている値を保持
+  const currentVal = levelSelect.value || "1";
+  let optionsHtml = "";
 
-  if (gameMode === 'cpu') {
-    // CPU対戦の表示
-    levelSelect.innerHTML = `
-      <option value="1">レベル1（凡人）</option>
-      <option value="2">レベル2（秀才）</option>
-      <option value="3">レベル3（天才）</option>
-      <option value="4">レベル4（鬼）</option>
-    `;
+  if (gameMode === 'ta') {
+    // タイムアタックは全レベル最初から選択可能（目標打鍵数表示）
+    const taLevels = [
+      { id: 1, name: "レベル1", target: 50 },
+      { id: 2, name: "レベル2", target: 100 },
+      { id: 3, name: "レベル3", target: 150 },
+      { id: 4, name: "大会", target: 200 }
+    ];
+
+    taLevels.forEach(lvl => {
+      optionsHtml += `<option value="${lvl.id}">${lvl.name}（目標 ${lvl.target}打）</option>`;
+    });
   } else {
-    // タイムアタックの表示
-    levelSelect.innerHTML = `
-      <option value="1">レベル1</option>
-      <option value="2">レベル2</option>
-      <option value="3">レベル3</option>
-      <option value="4">大会</option>
-    `;
+    // CPU対戦は順番に解放（目標 KPM 表示）
+    const unlockedLvl = getUnlockedLevel('cpu');
+    for (let i = 1; i <= 21; i++) {
+      let targetKpm = getTargetCount(i, 'cpu');
+      let isLocked = i > unlockedLvl;
+      let disabledAttr = isLocked ? "disabled" : "";
+      let lockIcon = isLocked ? " 🔒" : "";
+      
+      let labelName = `レベル${i}`;
+      optionsHtml += `<option value="${i}" ${disabledAttr}>${labelName}（目標 ${targetKpm}KPM）${lockIcon}</option>`;
+    }
   }
 
-  levelSelect.value = currentVal; // 値を復元
+  levelSelect.innerHTML = optionsHtml;
+  
+  if (gameMode === 'cpu') {
+    const unlockedLvl = getUnlockedLevel('cpu');
+    if (Number(currentVal) > unlockedLvl) {
+      levelSelect.value = unlockedLvl.toString();
+    } else {
+      levelSelect.value = currentVal;
+    }
+  } else {
+    levelSelect.value = currentVal <= 4 ? currentVal : "1";
+  }
 }
 
 // ==========================================
@@ -692,12 +746,11 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.classList.add('active');
       gameMode = btn.getAttribute('data-mode');
       
-      // モードが切り替わった時に選択肢の表示を更新
       updateLevelOptions();
+      updateRankingDisplay();
     });
   });
 
-  // 初期表示時の選択肢を設定
   updateLevelOptions();
   updateRankingDisplay();
 
@@ -715,6 +768,7 @@ document.addEventListener('DOMContentLoaded', () => {
     retryBtn.onclick = () => {
       document.getElementById('result-screen').classList.remove('active');
       document.getElementById('start-screen').classList.add('active');
+      updateLevelOptions();
       updateRankingDisplay();
     };
   }
