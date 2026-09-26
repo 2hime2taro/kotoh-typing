@@ -141,6 +141,7 @@ const WORD_LIST = {
   ]
 };
 
+// かな→ローマ字変換テーブル
 const ROMA_MAP = {
   'あ':['a'], 'い':['i'], 'う':['u'], 'え':['e'], 'お':['o'],
   'か':['ka'], 'き':['ki'], 'く':['ku'], 'け':['ke'], 'こ':['ko'],
@@ -179,11 +180,25 @@ const ROMA_MAP = {
 // ==========================================
 // 2. 変数管理
 // ==========================================
+let gameMode = 'ta'; // 'ta': タイムアタック, 'cpu': CPU対戦
 let gameTime = 30;
 let timerInterval = null;
+let gameStartTime = 0; 
 let score = 0;
 let totalTypedCount = 0;
 let missCount = 0;
+
+// CPU対戦用
+let cpuScore = 0;
+let cpuInterval = null;
+let meterValue = 50; 
+
+const CPU_SPEED_TARGETS = {
+  "1": 1.7,
+  "2": 3.3,
+  "3": 5.0,
+  "4": 8.3
+};
 
 let remainingWords = []; 
 let nextItem = null;
@@ -248,33 +263,26 @@ function parseKanaToRomaPatterns(kanaStr) {
 }
 
 // ==========================================
-// 4. ハイスコア・ランキング管理 (localStorage)
+// 4. ランキング機能 (Local Storage)
 // ==========================================
 function getScores(level) {
-  const data = localStorage.getItem(`kotou_typing_scores_lvl_${level}`);
-  return data ? JSON.parse(data) : [];
+  const dataStr = localStorage.getItem(`kotou_typing_scores_lvl_${level}`);
+  return dataStr ? JSON.parse(dataStr) : [];
 }
 
 function saveScore(level, name, kpm) {
   let scores = getScores(level);
-  scores.push({ name, kpm, date: new Date().toLocaleDateString() });
+  scores.push({ name: name, kpm: kpm, date: new Date().toLocaleDateString() });
   scores.sort((a, b) => b.kpm - a.kpm);
-  scores = scores.slice(0, 5); // 上位5件まで保持
+  scores = scores.slice(0, 5);
   localStorage.setItem(`kotou_typing_scores_lvl_${level}`, JSON.stringify(scores));
-  return scores;
 }
 
-// ランキング表示の更新処理
 function updateRankingDisplay() {
   const levelSelect = document.getElementById('level-select');
   const level = levelSelect ? levelSelect.value : "1";
   const scores = getScores(level);
   const rankingList = document.getElementById('ranking-list');
-  const bestKpmEl = document.getElementById('best-kpm');
-
-  if (bestKpmEl) {
-    bestKpmEl.textContent = scores.length > 0 ? scores[0].kpm : 0;
-  }
 
   if (rankingList) {
     if (scores.length === 0) {
@@ -291,18 +299,25 @@ function updateRankingDisplay() {
   }
 }
 
-// 読み込み完了時に確実に呼び出す
-document.addEventListener('DOMContentLoaded', () => {
-  updateRankingDisplay();
-
-  const levelSelect = document.getElementById('level-select');
-  if (levelSelect) {
-    levelSelect.addEventListener('change', updateRankingDisplay);
-  }
-});
 // ==========================================
 // 5. 表示・ゲーム進行ロジック
 // ==========================================
+function updateMeterDisplay() {
+  const fill = document.getElementById('meter-bar-fill');
+  if (fill) {
+    fill.style.width = `${meterValue}%`;
+  }
+}
+
+function pushMeter(amount) {
+  meterValue = Math.min(100, Math.max(0, meterValue + amount));
+  updateMeterDisplay();
+
+  if (meterValue >= 100 || meterValue <= 0) {
+    endGame();
+  }
+}
+
 function updateDisplay() {
   const untypedTextDisplay = document.getElementById('untyped-text');
   if (!untypedTextDisplay) return;
@@ -377,8 +392,9 @@ function handleKeyPress(e) {
       
       if (!currentCandidates) {
         totalTypedCount++;
-        score += 10;
+        score = totalTypedCount;
         if (scoreDisplay) scoreDisplay.textContent = score;
+        if (gameMode === 'cpu') pushMeter(2.5);
         nextWord();
         return;
       }
@@ -392,8 +408,12 @@ function handleKeyPress(e) {
     currentMatchedInput = testInput;
     typedRoma += inputKey;
     totalTypedCount++;
-    score += 10;
+    score = totalTypedCount;
     if (scoreDisplay) scoreDisplay.textContent = score;
+
+    if (gameMode === 'cpu') {
+      pushMeter(2.5);
+    }
 
     if (currentMatchedInput === matchedPattern) {
       currentPatternIndex++;
@@ -418,6 +438,22 @@ function handleKeyPress(e) {
   }
 }
 
+function startCpu() {
+  cpuScore = 0;
+  const levelSelect = document.getElementById('level-select');
+  const level = levelSelect ? levelSelect.value : "1";
+  
+  const hitsPerSec = CPU_SPEED_TARGETS[level] || 2.0;
+  const intervalMs = 1000 / hitsPerSec;
+
+  if (cpuInterval) clearInterval(cpuInterval);
+
+  cpuInterval = setInterval(() => {
+    cpuScore++;
+    pushMeter(-2.5);
+  }, intervalMs);
+}
+
 function showResults() {
   const playerNameInput = document.getElementById('player-name-input');
   const name = (playerNameInput && playerNameInput.value.trim()) || "ゲスト";
@@ -426,73 +462,73 @@ function showResults() {
 
   document.getElementById('res-player-name').textContent = name;
 
-  const kpm = totalTypedCount * 2; 
+  let elapsedMinutes = 0.5;
+  if (gameMode === 'cpu') {
+    const elapsedSeconds = Math.max(1, (Date.now() - gameStartTime) / 1000);
+    elapsedMinutes = elapsedSeconds / 60;
+  }
+
+  const kpm = Math.round(totalTypedCount / elapsedMinutes);
   const totalInputs = totalTypedCount + missCount;
   const accuracy = totalInputs > 0 ? ((totalTypedCount / totalInputs) * 100).toFixed(1) : 0;
 
+  document.getElementById('res-typed').textContent = `${totalTypedCount} 打`;
   document.getElementById('res-wpm').textContent = kpm;
   document.getElementById('res-accuracy').textContent = `${accuracy}%`;
   document.getElementById('res-miss').textContent = `${missCount} 回`;
 
-  const prevScores = getScores(level);
-  const isNewRecord = prevScores.length === 0 || kpm > prevScores[0].kpm;
+  const vsBox = document.getElementById('vs-result-box');
+  const cpuStatBox = document.getElementById('res-cpu-stat-box');
+  const targetStatBox = document.getElementById('res-target-count') ? document.getElementById('res-target-count').parentElement : null;
+  const resTitleText = document.getElementById('result-title-text');
+
+  if (gameMode === 'cpu') {
+    resTitleText.textContent = "タイピング対戦 結果証明書";
+    if (vsBox) vsBox.style.display = "block";
+    if (cpuStatBox) cpuStatBox.style.display = "flex";
+    if (targetStatBox) targetStatBox.style.display = "none";
+    
+    document.getElementById('res-cpu-typed').textContent = `${cpuScore} 打`;
+
+    const vsStatusEl = document.getElementById('res-vs-status');
+    const targetMsgEl = document.getElementById('res-target-msg');
+    
+    const isWin = meterValue >= 100 || meterValue > 50;
+
+    if (isWin) {
+      if (vsStatusEl) { vsStatusEl.textContent = "WIN!"; vsStatusEl.className = "vs-status win"; }
+      if (targetMsgEl) { targetMsgEl.textContent = "🎉 メーターを押し切って完全勝利！"; targetMsgEl.style.color = "#2b6cb0"; }
+    } else {
+      if (vsStatusEl) { vsStatusEl.textContent = "LOSE..."; vsStatusEl.className = "vs-status lose"; }
+      if (targetMsgEl) { targetMsgEl.textContent = "❌ CPUに押し切られました..."; targetMsgEl.style.color = "#e53e3e"; }
+    }
+  } else {
+    // タイムアタックモード
+    resTitleText.textContent = "タイムアタック 結果証明書";
+    if (vsBox) vsBox.style.display = "none";
+    if (cpuStatBox) cpuStatBox.style.display = "none";
+    if (targetStatBox) targetStatBox.style.display = "flex";
+  }
+
   saveScore(level, name, kpm);
 
-  const recordMsgEl = document.getElementById('new-record-msg');
-  if (recordMsgEl) {
-    recordMsgEl.style.display = isNewRecord ? 'block' : 'none';
-  }
-
   let title = "がんばろう！";
-
-  if (kpm >= 1340) {
-    title = "日本一位！";
-  } else if (kpm >= 1000) {
-    title = "日本2位！？";
-  } else if (kpm >= 900) {
-    title = "RTCに出てください";
-  } else if (kpm >= 800) {
-    title = "毎パソで1位になってください";
-  } else if (kpm >= 700) {
-    title = "神様ですか？";
-  } else if (kpm >= 690) {
-    title = "学校１位おめおめ！！！";
-  } else if (kpm >= 658) {
-    title = "え？…";
-  } else if (kpm >= 600) {
-    title = "学校1位の平均値じゃん！";
-  } else if (kpm >= 539) {
-    title = "学校1位の背中が見えてきた！！";
-  } else if (kpm >= 500) {
-    title = "学校5位以内…もう何が起こってるのか分からない";
-  } else if (kpm >= 470) {
-    title = "学校上位1%！？";
-  } else if (kpm >= 400) {
-    title = "学校15位以内！";
-  } else if (kpm >= 300) {
-    title = "速すぎて見えない…";
-  } else if (kpm >= 250) {
-    title = "学校上位20%以内！？";
-  } else if (kpm >= 200) {
-    title = "すご過ぎる！";
-  } else if (kpm >= 150) {
-    title = "は、速い…";
-  } else if (kpm >= 100) {
-    title = "湖東中学校では上位50%！";
-  } else if (kpm >= 40) {
-    title = "平均より早い！";
-  } else {
-    title = "がんばろう！";
-  }
-
-  const rankEl = document.getElementById('res-rank');
-  if (rankEl) rankEl.textContent = "-";
+  if (kpm >= 1000) title = "神の領域";
+  else if (kpm >= 800) title = "プロタイパー";
+  else if (kpm >= 600) title = "超上級者";
+  else if (kpm >= 400) title = "上級者";
+  else if (kpm >= 300) title = "中級者";
+  else if (kpm >= 200) title = "初級者";
+  else if (kpm >= 100) title = "見習い";
+  else title = "駆け出し";
 
   document.getElementById('res-title').textContent = title;
 }
 
 function endGame() {
-  clearInterval(timerInterval);
+  if (timerInterval) clearInterval(timerInterval);
+  if (cpuInterval) clearInterval(cpuInterval);
+
   window.removeEventListener('keydown', handleKeyPress);
   document.body.classList.remove('in-game');
 
@@ -550,14 +586,26 @@ function startGame() {
   const timerDisplay = document.getElementById('timer');
   const startScreen = document.getElementById('start-screen');
   const playScreen = document.getElementById('play-screen');
+  const vsMeterContainer = document.getElementById('vs-meter-container');
+  const timerStatusItem = document.getElementById('timer-status-item');
 
   score = 0;
   totalTypedCount = 0;
   missCount = 0;
   gameTime = 30;
+  meterValue = 50;
 
   if (scoreDisplay) scoreDisplay.textContent = score;
   if (timerDisplay) timerDisplay.textContent = gameTime;
+
+  if (gameMode === 'cpu') {
+    if (vsMeterContainer) vsMeterContainer.style.display = "block";
+    if (timerStatusItem) timerStatusItem.style.display = "none";
+    updateMeterDisplay();
+  } else {
+    if (vsMeterContainer) vsMeterContainer.style.display = "none";
+    if (timerStatusItem) timerStatusItem.style.display = "block";
+  }
 
   const level = levelSelect ? levelSelect.value : "1";
   remainingWords = WORD_LIST[level] ? [...WORD_LIST[level]] : [...WORD_LIST[1]];
@@ -574,16 +622,59 @@ function startGame() {
 
   startCountdown(() => {
     window.addEventListener('keydown', handleKeyPress);
+    gameStartTime = Date.now();
 
-    if (timerInterval) clearInterval(timerInterval);
-    timerInterval = setInterval(() => {
-      gameTime--;
-      if (timerDisplay) timerDisplay.textContent = gameTime;
-      if (gameTime <= 0) {
-        endGame();
-      }
-    }, 1000);
+    if (gameMode === 'cpu') {
+      startCpu();
+    } else {
+      if (timerInterval) clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        gameTime--;
+        if (timerDisplay) timerDisplay.textContent = gameTime;
+        if (gameTime <= 0) {
+          endGame();
+        }
+      }, 1000);
+    }
   });
+}
+
+// モードに応じて難易度の表示名と背景色クラスを切り替える関数
+function updateLevelOptions() {
+  const levelSelect = document.getElementById('level-select');
+  
+  // 背景色のクラス切り替え（落ち着いた色にするため body にクラスを付与）
+  if (gameMode === 'cpu') {
+    document.body.classList.remove('mode-ta');
+    document.body.classList.add('mode-cpu');
+  } else {
+    document.body.classList.remove('mode-cpu');
+    document.body.classList.add('mode-ta');
+  }
+
+  if (!levelSelect) return;
+
+  const currentVal = levelSelect.value; // 現在選ばれている値を保持
+
+  if (gameMode === 'cpu') {
+    // CPU対戦の表示
+    levelSelect.innerHTML = `
+      <option value="1">レベル1（凡人）</option>
+      <option value="2">レベル2（秀才）</option>
+      <option value="3">レベル3（天才）</option>
+      <option value="4">レベル4（鬼）</option>
+    `;
+  } else {
+    // タイムアタックの表示
+    levelSelect.innerHTML = `
+      <option value="1">レベル1</option>
+      <option value="2">レベル2</option>
+      <option value="3">レベル3</option>
+      <option value="4">大会</option>
+    `;
+  }
+
+  levelSelect.value = currentVal; // 値を復元
 }
 
 // ==========================================
@@ -593,7 +684,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const startBtn = document.getElementById('start-btn');
   const retryBtn = document.getElementById('retry-btn');
   const levelSelect = document.getElementById('level-select');
+  const modeBtns = document.querySelectorAll('.mode-btn');
 
+  modeBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      modeBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      gameMode = btn.getAttribute('data-mode');
+      
+      // モードが切り替わった時に選択肢の表示を更新
+      updateLevelOptions();
+    });
+  });
+
+  // 初期表示時の選択肢を設定
+  updateLevelOptions();
   updateRankingDisplay();
 
   if (levelSelect) {
